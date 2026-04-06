@@ -1,0 +1,11 @@
+{
+  "name": "true-queue",
+  "version": "1.0.0",
+  "description": "Task queue for pi that prevents goal anchoring",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./index.ts"],
+    "skills": ["./skills"]
+  }
+}

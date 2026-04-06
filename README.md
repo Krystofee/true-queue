@@ -51,12 +51,14 @@ The agent also has an `enqueue_task` tool, so you can ask it to queue something 
 
 ## Install
 
-Copy `index.ts` to `~/.pi/agent/extensions/true-queue/index.ts`.
+```
+pi install github.com/Krystofee/true-queue
+```
 
-Or clone this repo:
+Or try it without installing:
 
 ```
-git clone https://github.com/Krystofee/true-queue.git ~/.pi/agent/extensions/true-queue
+pi -e git:github.com/Krystofee/true-queue
 ```
 
 ## Pair with sequential-isolation
