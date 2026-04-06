@@ -28,6 +28,8 @@ Use `++` if you want a confirmation prompt before a task starts:
 
 Press `ctrl+q` (or type `/queue`) to open the queue editor overlay. Works while the agent is running.
 
+![Queue Editor](queue-editor.png)
+
 - `↑↓` navigate
 - `⇧↑↓` reorder
 - `a` add, `e` edit, `d` delete
