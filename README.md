@@ -1,5 +1,7 @@
 # true-queue
 
+![Queue Editor](queue-editor.png)
+
 A task queue extension for [pi](https://github.com/badlogic/pi). Prevents the agent from seeing future tasks, so it focuses on the current one instead of rushing through it.
 
 ## The problem
@@ -27,8 +29,6 @@ Use `++` if you want a confirmation prompt before a task starts:
 ## Queue editor
 
 Press `ctrl+q` (or type `/queue`) to open the queue editor overlay. Works while the agent is running.
-
-![Queue Editor](queue-editor.png)
 
 - `↑↓` navigate
 - `⇧↑↓` reorder
