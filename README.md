@@ -2,7 +2,7 @@
 
 ![Queue Editor](queue-editor.png)
 
-A task queue extension for [pi](https://github.com/badlogic/pi). Prevents the agent from seeing future tasks, so it focuses on the current one instead of rushing through it.
+A task queue extension for [pi](https://github.com/badlogic/pi-mono). Prevents the agent from seeing future tasks, so it focuses on the current one instead of rushing through it.
 
 ## Steering vs. queuing
 
