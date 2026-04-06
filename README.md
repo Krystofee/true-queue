@@ -52,7 +52,7 @@ The agent also has an `enqueue_task` tool, so you can ask it to queue something 
 ## Install
 
 ```
-pi install github.com/Krystofee/true-queue
+pi install git:github.com/Krystofee/true-queue
 ```
 
 Or try it without installing:
