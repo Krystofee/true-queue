@@ -63,6 +63,3 @@ Or try it without installing:
 pi -e git:github.com/Krystofee/true-queue
 ```
 
-## Pair with sequential-isolation
-
-This extension handles the infrastructure side. For the cognitive side, pair it with the [sequential-isolation](https://github.com/Krystofee/true-queue/blob/main/skills/sequential-isolation/SKILL.md) skill that teaches the agent to self-check for rushed work.
