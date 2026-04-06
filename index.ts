@@ -183,8 +183,19 @@ export default function (pi: ExtensionAPI) {
 
 	// ── Widget ──
 
+	function updateStatus(ctx: ExtensionContext) {
+		if (!ctx.hasUI) return;
+		if (state.queue.length > 0 || state.currentTask) {
+			const theme = ctx.ui.theme;
+			ctx.ui.setStatus("true-queue", theme.fg("dim", "ctrl+q queue"));
+		} else {
+			ctx.ui.setStatus("true-queue", undefined);
+		}
+	}
+
 	function updateWidget(ctx: ExtensionContext) {
 		if (!ctx.hasUI) return;
+		updateStatus(ctx);
 
 		if (!state.currentTask && state.queue.length === 0 && !state.paused) {
 			ctx.ui.setWidget("true-queue", undefined);
