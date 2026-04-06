@@ -4,9 +4,13 @@
 
 A task queue extension for [pi](https://github.com/badlogic/pi). Prevents the agent from seeing future tasks, so it focuses on the current one instead of rushing through it.
 
-## The problem
+## Steering vs. queuing
 
-When an LLM agent sees multiple tasks at once, it rushes through the early ones to get to the last one. This is well-documented (goal anchoring, completion bias). The fix is simple: don't show it the next task until the current one is done.
+pi already lets you type while the agent works. That's **steering** — your message lands in the current context and the agent sees it mid-task. Good for corrections, follow-ups, adding detail.
+
+Queuing is different. When you prefix a message with `+`, the agent never sees it. It's held back until the current task is done, then sent as a fresh prompt. The agent has no idea there's a queue.
+
+Why it matters: when an LLM sees multiple tasks at once, it rushes through the early ones to get to the last one. This is well-documented (goal anchoring, completion bias). Steering makes it worse — you're adding future work into the context. Queuing fixes it by hiding what's next.
 
 ## How it works
 
