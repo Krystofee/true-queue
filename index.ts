@@ -204,18 +204,18 @@ export default function (pi: ExtensionAPI) {
 
 		ctx.ui.setWidget("true-queue", (_tui, theme) => {
 			return {
-				render: () => renderWidgetLines(theme),
+				render: (width: number) => renderWidgetLines(theme, width),
 				invalidate: () => {},
 			};
 		});
 	}
 
-	function renderWidgetLines(theme: Theme): string[] {
+	function renderWidgetLines(theme: Theme, width: number): string[] {
 		const lines: string[] = [];
 
 		if (state.currentTask) {
 			const pauseIcon = state.paused ? theme.fg("warning", " ⏸") : "";
-			lines.push(theme.fg("accent", "🎯 ") + theme.fg("toolTitle", state.currentTask) + pauseIcon);
+			lines.push(truncateToWidth(theme.fg("accent", "🎯 ") + theme.fg("toolTitle", state.currentTask) + pauseIcon, width));
 		} else if (state.paused) {
 			lines.push(theme.fg("warning", "⏸ Queue paused"));
 		}
@@ -225,12 +225,12 @@ export default function (pi: ExtensionAPI) {
 				const t = state.queue[i];
 				const num = theme.fg("dim", `${i + 1}.`);
 				const confirmIcon = t.confirm ? theme.fg("warning", "◉ ") : "";
-				lines.push(`  ${num} ${confirmIcon}${theme.fg("muted", t.text)}`);
+				lines.push(truncateToWidth(`  ${num} ${confirmIcon}${theme.fg("muted", t.text)}`, width));
 			}
 		}
 
 		if (state.paused && state.pauseReason) {
-			lines.push(theme.fg("dim", `   ${state.pauseReason}`));
+			lines.push(truncateToWidth(theme.fg("dim", `   ${state.pauseReason}`), width));
 		}
 
 		return lines;
