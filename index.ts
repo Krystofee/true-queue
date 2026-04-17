@@ -26,9 +26,21 @@
  */
 
 import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
-import { DynamicBorder } from "@mariozechner/pi-coding-agent";
-import { CURSOR_MARKER, type Focusable, matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { type Focusable, matchesKey, type OverlayHandle, truncateToWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+
+/**
+ * Flatten any text to a single display line.
+ * Replaces CR/LF/tabs/multiple spaces with a single space so multi-line
+ * tasks don't break widget/list layout.
+ */
+function singleLineDisplay(text: string): string {
+	return text.replace(/\s+/g, " ").trim();
+}
+
+function isMultiline(text: string): boolean {
+	return /[\r\n]/.test(text);
+}
 
 const DEQUEUE_DELAY_MS = 1000;
 
@@ -215,7 +227,14 @@ export default function (pi: ExtensionAPI) {
 
 		if (state.currentTask) {
 			const pauseIcon = state.paused ? theme.fg("warning", " ⏸") : "";
-			lines.push(truncateToWidth(theme.fg("accent", "🎯 ") + theme.fg("toolTitle", state.currentTask) + pauseIcon, width));
+			const multiIcon = isMultiline(state.currentTask) ? theme.fg("dim", "↵ ") : "";
+			const flat = singleLineDisplay(state.currentTask);
+			lines.push(
+				truncateToWidth(
+					theme.fg("accent", "🎯 ") + multiIcon + theme.fg("toolTitle", flat) + pauseIcon,
+					width,
+				),
+			);
 		} else if (state.paused) {
 			lines.push(theme.fg("warning", "⏸ Queue paused"));
 		}
@@ -225,12 +244,14 @@ export default function (pi: ExtensionAPI) {
 				const t = state.queue[i];
 				const num = theme.fg("dim", `${i + 1}.`);
 				const confirmIcon = t.confirm ? theme.fg("warning", "◉ ") : "";
-				lines.push(truncateToWidth(`  ${num} ${confirmIcon}${theme.fg("muted", t.text)}`, width));
+				const multiIcon = isMultiline(t.text) ? theme.fg("dim", "↵ ") : "";
+				const flat = singleLineDisplay(t.text);
+				lines.push(truncateToWidth(`  ${num} ${confirmIcon}${multiIcon}${theme.fg("muted", flat)}`, width));
 			}
 		}
 
 		if (state.paused && state.pauseReason) {
-			lines.push(truncateToWidth(theme.fg("dim", `   ${state.pauseReason}`), width));
+			lines.push(truncateToWidth(theme.fg("dim", `   ${singleLineDisplay(state.pauseReason)}`), width));
 		}
 
 		return lines;
@@ -245,16 +266,43 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
+		let overlayHandle: OverlayHandle | undefined;
+
+		// Open ctx.ui.editor() while temporarily hiding our overlay.
+		// This gives us a full multi-line editor (with history, Ctrl+G external
+		// editor support, etc.) for adding/editing tasks instead of the cramped
+		// inline input that couldn't handle newlines.
+		const runEditor = async (title: string, prefill: string): Promise<string | undefined> => {
+			const wasHidden = overlayHandle?.isHidden() ?? false;
+			overlayHandle?.setHidden(true);
+			try {
+				return await ctx.ui.editor(title, prefill);
+			} finally {
+				overlayHandle?.setHidden(wasHidden);
+			}
+		};
+
 		await ctx.ui.custom<void>(
 			(tui, theme, _kb, done) => {
-				const editor = new QueueEditor(theme, state, done, () => {
-					persist();
-					updateWidget(ctx);
-					tui.requestRender();
-				});
+				const editor = new QueueEditor(
+					theme,
+					state,
+					done,
+					() => {
+						persist();
+						updateWidget(ctx);
+						tui.requestRender();
+					},
+					runEditor,
+				);
 				return editor;
 			},
-			{ overlay: true },
+			{
+				overlay: true,
+				onHandle: (h) => {
+					overlayHandle = h;
+				},
+			},
 		);
 	}
 
@@ -447,62 +495,23 @@ export default function (pi: ExtensionAPI) {
 class QueueEditor implements Focusable {
 	focused = false;
 	private selected = 0;
-	private adding = false;
-	private addText = "";
-	private addCursor = 0;
-	private editing = -1;
-	private editText = "";
-	private editCursor = 0;
+	/**
+	 * When true, the multi-line editor dialog is open in front of this overlay.
+	 * We ignore keypresses in this state so the user's input goes to the editor.
+	 */
+	private busy = false;
 
 	constructor(
 		private theme: Theme,
 		private state: QueueState,
 		private done: (result: void) => void,
 		private onChange: () => void,
+		private runEditor: (title: string, prefill: string) => Promise<string | undefined>,
 	) {}
 
 	handleInput(data: string): void {
-		// Adding mode
-		if (this.adding) {
-			if (matchesKey(data, "escape")) {
-				this.adding = false;
-				return;
-			}
-			if (matchesKey(data, "return")) {
-				const text = this.addText.trim();
-				if (text) {
-					this.state.queue.push({ text, confirm: false });
-					this.onChange();
-				}
-				this.adding = false;
-				this.addText = "";
-				this.addCursor = 0;
-				return;
-			}
-			this.handleTextInput(data, "add");
-			return;
-		}
+		if (this.busy) return;
 
-		// Editing mode
-		if (this.editing >= 0) {
-			if (matchesKey(data, "escape")) {
-				this.editing = -1;
-				return;
-			}
-			if (matchesKey(data, "return")) {
-				const text = this.editText.trim();
-				if (text && this.editing < this.state.queue.length) {
-					this.state.queue[this.editing].text = text;
-					this.onChange();
-				}
-				this.editing = -1;
-				return;
-			}
-			this.handleTextInput(data, "edit");
-			return;
-		}
-
-		// Normal mode
 		if (matchesKey(data, "escape") || matchesKey(data, "q")) {
 			this.done();
 			return;
@@ -537,15 +546,9 @@ class QueueEditor implements Focusable {
 				this.onChange();
 			}
 		} else if (matchesKey(data, "a")) {
-			this.adding = true;
-			this.addText = "";
-			this.addCursor = 0;
+			void this.addTask();
 		} else if (matchesKey(data, "e") || matchesKey(data, "return")) {
-			if (this.selected < qLen) {
-				this.editing = this.selected;
-				this.editText = this.state.queue[this.selected].text;
-				this.editCursor = this.editText.length;
-			}
+			if (this.selected < qLen) void this.editTask(this.selected);
 		} else if (matchesKey(data, "c")) {
 			if (this.selected < qLen) {
 				this.state.queue[this.selected].confirm = !this.state.queue[this.selected].confirm;
@@ -558,41 +561,46 @@ class QueueEditor implements Focusable {
 		}
 	}
 
-	private handleTextInput(data: string, mode: "add" | "edit") {
-		const text = mode === "add" ? this.addText : this.editText;
-		const cursor = mode === "add" ? this.addCursor : this.editCursor;
-
-		let newText = text;
-		let newCursor = cursor;
-
-		if (matchesKey(data, "backspace")) {
-			if (cursor > 0) {
-				newText = text.slice(0, cursor - 1) + text.slice(cursor);
-				newCursor = cursor - 1;
+	private async addTask(): Promise<void> {
+		this.busy = true;
+		this.onChange();
+		try {
+			const result = await this.runEditor("Add queued task", "");
+			const text = result?.trim();
+			if (text) {
+				this.state.queue.push({ text, confirm: false });
+				this.selected = this.state.queue.length - 1;
+				this.onChange();
 			}
-		} else if (matchesKey(data, "delete")) {
-			if (cursor < text.length) {
-				newText = text.slice(0, cursor) + text.slice(cursor + 1);
-			}
-		} else if (matchesKey(data, "left")) {
-			newCursor = Math.max(0, cursor - 1);
-		} else if (matchesKey(data, "right")) {
-			newCursor = Math.min(text.length, cursor + 1);
-		} else if (matchesKey(data, "home")) {
-			newCursor = 0;
-		} else if (matchesKey(data, "end")) {
-			newCursor = text.length;
-		} else if (data.length === 1 && data.charCodeAt(0) >= 32) {
-			newText = text.slice(0, cursor) + data + text.slice(cursor);
-			newCursor = cursor + 1;
+		} finally {
+			this.busy = false;
+			this.onChange();
 		}
+	}
 
-		if (mode === "add") {
-			this.addText = newText;
-			this.addCursor = newCursor;
-		} else {
-			this.editText = newText;
-			this.editCursor = newCursor;
+	private async editTask(index: number): Promise<void> {
+		if (index < 0 || index >= this.state.queue.length) return;
+		this.busy = true;
+		this.onChange();
+		try {
+			const current = this.state.queue[index];
+			const result = await this.runEditor("Edit queued task", current.text);
+			if (result === undefined) return;
+			const text = result.trim();
+			if (!text) {
+				// Empty on save = delete.
+				this.state.queue.splice(index, 1);
+				if (this.selected >= this.state.queue.length && this.selected > 0) this.selected--;
+				this.onChange();
+				return;
+			}
+			if (index < this.state.queue.length) {
+				this.state.queue[index].text = text;
+				this.onChange();
+			}
+		} finally {
+			this.busy = false;
+			this.onChange();
 		}
 	}
 
@@ -601,10 +609,6 @@ class QueueEditor implements Focusable {
 		const innerW = width - 4;
 		const lines: string[] = [];
 
-		const pad = (s: string, w: number) => {
-			const vis = visibleWidth(s);
-			return s + " ".repeat(Math.max(0, w - vis));
-		};
 		const row = (content: string) => "  " + truncateToWidth(content, innerW);
 
 		// Header
@@ -613,50 +617,35 @@ class QueueEditor implements Focusable {
 		lines.push(row(th.fg("accent", th.bold("📋 Queue Editor")) + pauseLabel));
 		lines.push(row(""));
 
-		// Current task
+		// Current task — always flattened to a single line.
 		if (this.state.currentTask) {
-			lines.push(row(th.fg("dim", "Current: ") + th.fg("toolTitle", this.state.currentTask)));
+			const multiIcon = isMultiline(this.state.currentTask) ? th.fg("dim", "↵ ") : "";
+			const flat = singleLineDisplay(this.state.currentTask);
+			lines.push(row(th.fg("dim", "Current: ") + multiIcon + th.fg("toolTitle", flat)));
 			lines.push(row(""));
 		}
 
-		// Queue items
+		// Queue items — always one line per entry.
 		if (this.state.queue.length === 0) {
 			lines.push(row(th.fg("dim", "  (empty queue)")));
 		} else {
 			for (let i = 0; i < this.state.queue.length; i++) {
 				const item = this.state.queue[i];
-				const isSelected = i === this.selected && !this.adding;
+				const isSelected = i === this.selected;
 				const prefix = isSelected ? th.fg("accent", "▸ ") : "  ";
 				const num = th.fg("dim", `${i + 1}.`);
 				const confirmIcon = item.confirm ? th.fg("warning", "◉ ") : "";
-
-				if (this.editing === i) {
-					const marker = this.focused ? CURSOR_MARKER : "";
-					const before = this.editText.slice(0, this.editCursor);
-					const cursorChar = this.editCursor < this.editText.length ? this.editText[this.editCursor]! : " ";
-					const after = this.editText.slice(this.editCursor + 1);
-					lines.push(row(`${prefix}${num} ${confirmIcon}${before}${marker}\x1b[7m${cursorChar}\x1b[27m${after}`));
-				} else {
-					const textColor = isSelected ? "text" : "muted";
-					lines.push(row(`${prefix}${num} ${confirmIcon}${th.fg(textColor, item.text)}`));
-				}
+				const multiIcon = isMultiline(item.text) ? th.fg("dim", "↵ ") : "";
+				const flat = singleLineDisplay(item.text);
+				const textColor = isSelected ? "text" : "muted";
+				lines.push(row(`${prefix}${num} ${confirmIcon}${multiIcon}${th.fg(textColor, flat)}`));
 			}
-		}
-
-		// Add input
-		if (this.adding) {
-			lines.push(row(""));
-			const marker = this.focused ? CURSOR_MARKER : "";
-			const before = this.addText.slice(0, this.addCursor);
-			const cursorChar = this.addCursor < this.addText.length ? this.addText[this.addCursor]! : " ";
-			const after = this.addText.slice(this.addCursor + 1);
-			lines.push(row(th.fg("accent", "  + ") + `${before}${marker}\x1b[7m${cursorChar}\x1b[27m${after}`));
 		}
 
 		// Help
 		lines.push(row(""));
-		if (this.adding || this.editing >= 0) {
-			lines.push(row(th.fg("dim", "enter confirm • esc cancel")));
+		if (this.busy) {
+			lines.push(row(th.fg("dim", "editing in multi-line editor…")));
 		} else {
 			lines.push(row(th.fg("dim", "↑↓ navigate • ⇧↑↓ reorder • a add • e edit • d delete")));
 			lines.push(row(th.fg("dim", "c toggle confirm • p pause • esc close")));
